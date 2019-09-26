@@ -10,6 +10,10 @@ fontsize: 11pt
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = T)
+install.packages("caret")
+install.packages("MASS")
+install.packages("ridge")
+
 ```
 
 # Lab Section
@@ -62,7 +66,7 @@ library(MASS)
 library(ggplot2)
 library(dplyr)
 library(ggfortify)
-
+library(ridge)
 
 #Mauna Loa CO2 concentrations
 data(airquality)
@@ -72,8 +76,34 @@ data(airquality)
 1. Split data into training and test set (75% in train set, 25% in test set)
 
 ```{r}
-#train_regression = 
-#test_regression = 
+
+# view structure of data
+
+str(airquality) # all numerical values, but missing values present
+# investigate if missing values in relevant columns
+sum(is.na(airquality$Temp))
+sum(is.na(airquality$Wind))
+# missing values not relevant as they are not in Temp or Wind
+
+# set a random seed for reproducibility
+
+set.seed(101)
+
+# split data
+
+training_size <- floor(0.75 * nrow(airquality))
+training_index <- sample(seq_len(nrow(airquality)), size = training_size)
+
+train_regression <- airquality[training_index, ]
+test_regression <- airquality[-training_index, ]
+
+nrow(train_regression) # 114 rows - confirms split is correct 
+nrow(test_regression) # 39 rows
+
+# view split data
+train_regression
+test_regression
+
 ```
 
 
@@ -99,12 +129,20 @@ This is the data we will fit a linear model to.
 ```{r}
 #help(train)
 
-#linear_regression <- train( ~ , data= , method = "lm")
+linear_regression <- train(Temp ~ Wind, data = train_regression, method = "lm")
+
 ```
 
 
 3. Vizualize how your model performed on the train data by plotting the regression line on top of the train data points. 
 ```{r}
+
+ggplot(data=train_regression, aes(x=Wind, y=Temp)) +
+geom_point() +
+geom_line(aes(y=fitted(linear_regression)), colour = 'red') +
+theme_bw()
+
+# plot shows reasonable distribution of residuals (both long and short) i.e. approximately equal variance around the regression line. Therefore, model has performed reasonably well, when assessed visually.
 
 ```
 
@@ -119,28 +157,70 @@ This is the data we will fit a linear model to.
 4 a) See how the model performs on the test data
 ```{r}
 #help(predict)
-#linear_predict <- predict(, newdata=)
+
+linear_predict <- predict(linear_regression, newdata=test_regression)
+
 ```
 
 4 b) Look at the residuals. Are they close to zero?
 ```{r}
+
 #look at the median residual value. Close to zero is best
-#help(summary)
+help(summary)
+
+summary(linear_regression) # median residual value is 1.645
+
 ```
 
 
 4 c) Plot predicted temperature vs observed temperature. A strong model should show a strong correlation
 ```{r}
 
+# make a data frame first, for ease of comparison
+results <- cbind(linear_predict,test_regression$Temp) 
+colnames(results) <- c('predicted temperature','observed temperature')
+results <- as.data.frame(results)
+results
+
+# plot
+ggplot(data=results, aes(x=results$`observed temperature`, y=results$`predicted temperature`)) +
+geom_point() +
+labs(x = "observed temperature", y = "predicted temperature") +
+theme_bw() 
+
+# plot shows some degree of correlation between observed and predicted temperature values
+
 ```
 
 4 d) Visualize the predicted values in relation to the real data points. Look for homoscedasticity
 ```{r}
+
 # Extract coefficients from the model
+
+intercept <- linear_regression$finalModel$coefficients[1] 
+slope <- linear_regression$finalModel$coefficients[2]
+
+intercept # 91.13478 
+slope # -1.319254
 
 # plot the regression line on the predicted values
 
+ggplot(data=test_regression, aes(x=Wind, y=linear_predict)) +
+geom_point() +
+geom_abline(aes(intercept = intercept, slope = slope), colour = "red") +
+labs(y = "Predicted Temperature") +
+theme_bw()
+
 # plot the original test values
+
+# predicted and observed temperature values will be linked, for comparison
+
+ggplot(data = test_regression) +
+geom_point(aes(x=Wind, y=linear_predict, colour = 'predicted temperature')) +
+geom_point(aes(x=Wind, y=Temp, colour = 'observed temperature')) +
+geom_segment(aes(x = Wind, y = Temp, xend = Wind, yend = linear_predict)) +
+labs(y = "Temperature") +
+theme_bw()
 
 ```
 
@@ -150,12 +230,20 @@ This is the data we will fit a linear model to.
 
 #ggplot(data=residvpredict) +
 #  geom_density(aes(residual))
+
+ggplot() + geom_density(aes(residuals(linear_regression)))
+# shows reasonable normal distribution
+
+
 ```
 
 
 4 f) Independent variables and residuals should not be correlated
 ```{r}
-#cor.test(train_regression$Wind, resid(linear_regression))
+
+cor.test(train_regression$Wind, resid(linear_regression))
+# results, particularly p-value, do not show correlation
+
 ```
 
 
@@ -163,5 +251,43 @@ This is the data we will fit a linear model to.
 
 5. Create a linear model using L1 or L2 regularization to predict Temperature from Wind and Month variables. Plot your predicted values and the real Y values on the same plot. 
 
+
+
+```{r}
+
+# check for missing values in Month
+sum(is.na(airquality$Month)) # nil present
+
+# ridge regression model
+ridge_regression <- linearRidge(Temp ~ Wind + Month, data = train_regression, lambda = 'automatic')
+
+# apply model to test data
+ridge_predict <- predict(ridge_regression, newdata = test_regression)
+
+# plot (x-axis = Wind)
+ggplot(data = test_regression) +
+geom_point(aes(x=Wind, ridge_predict, colour = 'predicted temperature')) +
+geom_point(aes(x=Wind, y=Temp, colour = 'observed temperature')) +
+geom_segment(aes(x = Wind, y = Temp, xend = Wind, yend = ridge_predict)) +
+labs(y = 'Temperature') +
+theme_bw()
+
+# plot (x-axis = Month)
+ggplot(data = test_regression) +
+geom_point(aes(x=Month, y=ridge_predict, colour = 'predicted temperature')) +
+geom_point(aes(x=Month, y=Temp, colour = 'observed temperature')) +
+geom_segment(aes(x = Month, y = Temp, xend = Month, yend = ridge_predict)) +
+labs(y = 'Temperature') +
+theme_bw()
+
+# make a data frame as well, for ease of comparison
+results2 <- cbind(linear_predict, ridge_predict, test_regression$Temp) 
+colnames(results2) <- c('predicted temperature', 'predictions with ridge regression','observed temperature')
+results2 <- as.data.frame(results2)
+results2
+
+# SOME PREDICTIONS ARE CLOSER WITH RIDGE REGRESSION
+
+```
 
 
